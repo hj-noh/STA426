@@ -1,0 +1,142 @@
+---
+title: "ex7_heeju"
+author: "Heeju Noh"
+date: "November 17, 2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### **Exercise 7**
+
+
+```{r eval=TRUE, warning=FALSE, message=FALSE}
+library("limma")
+library("affy")
+library("preprocessCore")
+unzip("affy_estrogen.zip")
+ddir <- "C:/Users/Heeju/Desktop/STAT426/affy_estrogen"
+dir(ddir)
+```
+
+
+##### **Preprocess affymetrix data**
+```{r eval=TRUE, warning=FALSE, message=FALSE}
+targets <- readTargets("targets.txt", path=ddir)
+targets
+
+abatch <- ReadAffy(filenames=targets$filename,
+          celfile.path=ddir)
+eset <- rma(abatch)  # bg correct, normalize, summarize
+```
+
+
+
+##### **Multidimensional scailing (MDS) plot**
+```{r eval=TRUE, warning=FALSE, message=FALSE}
+plotMDS(exprs(eset) )  # MDS plot
+```
+
+
+##### **Design matrix**
+```{r}
+# do the limma modeling
+f <- paste(targets$estrogen,targets$time.h,sep="")
+f <- factor(f)
+
+# create design matrix
+design <- model.matrix(~0+f)
+colnames(design) <- levels(f)
+design
+fit <- lmFit(eset, design)
+```
+
+
+##### **Contrast matrix**
+```{r}
+cont.matrix <- makeContrasts(E10="present10-absent10",
+                             E48="present48-absent48",
+                             Time="absent48-absent10",levels=design)
+cont.matrix
+fit2  <- contrasts.fit(fit, cont.matrix)
+fit2  <- eBayes(fit2)
+
+class(fit2)
+names(fit2)
+```
+
+
+##### **Differential expression statistics**
+```{r}
+topTable(fit2,coef=1)
+topTable(fit2,coef=2)
+barplot( exprs(eset)["39642_at",], las=2, cex.names=.7 )  # top gene
+```
+
+
+##### **Question 1.  From the matrix of summarized Affymetrix data that went into the limma pipeline in the first place -- exprs(eset) -- manually calculate the logFC and AveExpr for one of the top differentially expressed genes.**
+
+From the topTables, I chose "910_at" as one of the top differentially expressed genes, and calculated logFC and average expressions over samples manually. The results of AveEXP and logFC were consistent with the values in topTables.
+
+```{r}
+probeID <- which(rownames(exprs(eset))=="910_at")
+exp_condi <- (t(design) %*% exprs(eset)[probeID,])/2
+logFC <- t(cont.matrix) %*% exp_condi
+AveEXP <- mean(exp_condi)
+
+AveEXP
+logFC
+```
+
+
+
+##### **Question 2. Venn diagram of differentially expressed genes among E10, E48 and Time.**
+```{r}
+a <- decideTests(fit2) # default setting: p-value=0.05, lfc=0, adjust.method="BH"
+vennDiagram(a)
+```
+
+
+##### **Question 3. Try to reproduce the above limma modeling using an alternative design matrix**
+
+I set a new design matrix as depicted below and calculated the coefficients of the linear model:
+
+```{r}
+# do the limma modeling
+f1 <- targets$estrogen
+f1 <- factor(f1)
+f2 <- targets$time.h
+f2 <- factor(f2)
+
+# create design matrix
+design2 <- model.matrix(~f1+f2+f1:f2)
+colnames(design2) <- c("a1","a2","a3","a4")
+design2[7:8,2]<-0
+design2
+fit <- lmFit(eset, design2)
+fit  <- eBayes(fit)
+```
+
+Now in this model, the expressions can be calculated as described as below:
+
+**absent10** = a1,
+**present10** = a1+a2,
+**absent48** = a1+a3,
+**present48** = a1+a3+a4,
+
+**E10 = "present10-absent10"** = a2,
+**E48 = "present48-absent48"** = a4,
+**Time = "absent48-absent10"** = a3,
+
+where a1, a2, a3, and a4 are the coefficients of the linear model.
+The results from new design matrix were the same as those from the first way, and the same statistical results could be reproduced. 
+
+```{r}
+topTable(fit,coef=2) # E10
+topTable(fit,coef=4) # E48
+b <- decideTests(fit[,2:4]) # default setting: p-value=0.05, lfc=0, adjust.method="BH"
+colnames(b) <- c("E10","Time","E48")
+vennDiagram(b)
+```
