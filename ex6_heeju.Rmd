@@ -1,0 +1,158 @@
+---
+title: "Exercise 6: Differential expression with the limma package"
+author: "Heeju Noh"
+date: "November 16, 2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#### 0. Generating Simulated Data
+
+Loading the limma package and a paramter setup:
+
+```{r}
+library("limma")
+
+nGenes <- 10000                   # number of "features"
+nSamples <- 6                     # number of samples (split equal in 2 groups)
+pDiff <- .1                       # percent of genes "differential 
+grp <- rep(0:1,each=nSamples/2)   # dummy variable for exp. group
+trueFC <- 2                    # log-fold-change of truly DE
+
+d0 <- 1
+s0 <- 0.8
+sd <- s0*sqrt(d0/rchisq(nGenes,df=d0))  # dist'n of s.d.
+```
+
+#### **Question 1. The distribution of "true" s.d.**
+```{r eval=TRUE,echo=FALSE}
+hist(log10(sd))
+```
+
+Minimum value in s.d.:
+```{r eval=TRUE,echo=FALSE}
+min(sd)
+```
+
+Maximum value in s.d.:
+```{r eval=TRUE,echo=FALSE}
+max(sd)
+```
+
+```{r}
+y <- matrix(rnorm(nGenes*nSamples,sd=sd),nr=nGenes,nc=nSamples) # Generating (null) data following the normal distribution with the standard deviation for each gene.
+
+indD <- 1:floor(pDiff*nGenes) # 1 to 10% of the number of genes to be differentially expressed
+diff <- sample(c(-1,1),max(indD),replace=TRUE)*trueFC # choose either 2 (positively differentially expressed) or -2 (negatively difeerentially expressed) randomly
+y[indD,grp==1] <- y[indD,grp==1] + diff # In group 1 (treated samples), 1 to 1000 (10%) genes are differentially expressed postively or negatively in addition to some noise generated already in y 
+```
+
+#### **Question 2. Simulated data**
+```{r eval=TRUE,echo=FALSE}
+par(mfrow=c(2,2))
+
+gi <- 1
+yminval <- floor(min(y[gi,]))
+ymaxval <- ceiling(max(y[gi,]))
+barplot(y[gi,],space =0, xlab="samples", ylab="expression",ylim=c(yminval,ymaxval),col=c("red","red","red","blue","blue","blue"))
+axis(1,at=0.5:1:nSamples,labels=grp,tick=FALSE)
+title(main="Gene 1")
+
+gi <- 5000
+yminval <- floor(min(y[gi,]))
+ymaxval <- ceiling(max(y[gi,]))
+barplot(y[gi,],space =0, xlab="samples", ylab="expression",ylim=c(yminval,ymaxval),col=c("red","red","red","blue","blue","blue"))
+axis(1,at=0.5:1:nSamples,labels=grp,tick=FALSE)
+title(main="Gene 5000")
+
+gi <- 2
+yminval <- floor(min(y[gi,]))
+ymaxval <- ceiling(max(y[gi,]))
+barplot(y[gi,],space =0, xlab="samples", ylab="expression",ylim=c(yminval,ymaxval),col=c("red","red","red","blue","blue","blue"))
+axis(1,at=0.5:1:nSamples,labels=grp,tick=FALSE)
+title(main="Gene 2")
+
+gi <- 5001
+yminval <- floor(min(y[gi,]))
+ymaxval <- ceiling(max(y[gi,]))
+barplot(y[gi,],space =0, xlab="samples", ylab="expression",ylim=c(yminval,ymaxval),col=c("red","red","red","blue","blue","blue"))
+axis(1,at=0.5:1:nSamples,labels=grp,tick=FALSE)
+title(main="Gene 5001")
+
+```
+The figure above shows the expression values of the samples (**blue: group0, red:group1**) for gene 1 and 2 (**differentially expresssed**) and gene 5000 and 5001 (**non-differnetially expressed**). In general, it was observed that the fold changes of samples in group1 for gene 1 to 1000 were around 2, but not for genes below 1000.
+
+#### **Question 3. Design matrix**
+```{r }
+design <- model.matrix(~grp)
+print(design)
+```
+Design matrix represents indicator variables in a linear model. For example, in this case, the first column indicates the intercept of the linear model, and the second column indicates the additional variable presented in group1 to explain the change of expressions from group0 to group1.
+
+```{r }
+fit <- lmFit(y,design)
+fit <- eBayes(fit)
+```
+
+#### **Question 4. Calculating the classical 2-sample t-test**
+```{r }
+classicalt <- apply(y,1,function(x) t.test(x~grp)$statistic)
+```
+
+#### **Question 5. Statistica summaries of t-scores and logFC from limma and t-test results from t.test**
+```{r }
+cols <- rep("black",nrow(y))
+cols[indD] <- "blue"
+
+par(mfrow=c(3,1))
+plot( fit$t[,2], col=cols, ylim=c(-10,10), pch=".", main="Moderated-t" )
+plot( fit$coef[,2], col=cols, ylim=c(-6,6), pch=".", main="log FC" )
+plot( classicalt, col=cols, ylim=c(-10,10), pch=".", main="Classical-t" )
+```
+First, coefficients in _fit_ variable represent the mean expression changes between group0 and group1 by linear fit. Therefore, the coefficients in the second plot shows mostly 2 or -2 in gene 1-1000 and around 0 in gene > 1000. Through two different analyses of t-test, it was observed that the t-scores calcuated by _t.test()_ show larger vairance than those from limma _fit_, which means much more data are not significant.
+
+#### **Question 6. Somparing methods by statistica analysis**
+```{r }
+par(mfrow=c(1,1))
+v1 <- sort(abs(fit$coefficients[,2]),decreasing=TRUE,index.return=TRUE)
+v2 <- sort(abs(fit$t[,2]),decreasing=TRUE,index.return=TRUE)
+v3 <- sort(abs(classicalt),decreasing=TRUE,index.return=TRUE)
+
+P <- floor(pDiff*nGenes)
+TP1 <- cumsum(as.numeric(v1$ix<=P))
+TP2 <- cumsum(as.numeric(v2$ix<=P))
+TP3 <- cumsum(as.numeric(v3$ix<=P))
+TPR1 <- TP1/P
+TPR2 <- TP2/P
+TPR3 <- TP3/P
+
+N <- nGenes-P
+FP1 <- cumsum(as.numeric(v1$ix>P))
+FP2 <- cumsum(as.numeric(v2$ix>P))
+FP3 <- cumsum(as.numeric(v3$ix>P))
+FPR1 <- FP1/N
+FPR2 <- FP2/N
+FPR3 <- FP3/N
+
+plot(FPR1,TPR1,type = "l", xlim=c(0,1), ylim=c(0,1),xlab="FPR",ylab="TPR")
+lines(FPR2,TPR2,col="red")
+lines(FPR3,TPR3,col="blue")
+title(main="ROC")
+legend(0.5,0.5, c("logFC", "fit$coef", "classical-t"), lty=c(1,1), col = c("black","red","blue"),box.lwd=0.3)
+
+library(flux) #_flux_ package was used for using _auc()_ function
+print(auc(FPR1,TPR1))
+print(auc(FPR2,TPR2))
+print(auc(FPR3,TPR3))
+```
+
+
+To compare the performance of methods in finding differentially expressed genes, I sorted absolute values of logFC from _fit.coef_ and  t-scores in decreasing orders. Then, I calculated true positive rates and false positive rates based on the truly differentially expression genes, and plotted ROC curves. Moreover, the areas under ROC are decreasing in the order of _fit.coef_, _fit.t_, and _classical t_.
+This demonstrates that using moderate t-scores calculated from limma is the best, and taking mean logFCs from _fit.ceof_ could not be accurate because it also includes many false positives.
+
+#### **Question 7. Parameters affecting the performance of the methods**
+As increasing number of samples from 6 to 50 which means increasing replicates, the performance by t-scores from both limma and classical method converges. On the other hand, the threshold of DE and the noise variance affect the results by logFC. The higher threshold of DE and smaller noise variance, the higher performance by logFC although the results by t-tests were still better. Finally, I could not observe a significant difference in results when varing the number of DE genes.
+
